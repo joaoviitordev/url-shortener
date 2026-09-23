@@ -6,8 +6,48 @@
 
 declare module "sst" {
   export interface Resource {
+    "BaseUrl": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
+    "HashIdsMinLength": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
+    "HashIdsSalt": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
+    "MongoMaxPoolSize": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
+    "MongoUrl": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
+    "MyRedis": {
+      "host": string
+      "password": string
+      "port": number
+      "type": "sst.aws.Redis"
+      "username": string
+    }
+    "MyService": {
+      "service": string
+      "type": "sst.aws.Service"
+      "url": string
+    }
     "MyVpc": {
       "type": "sst.aws.Vpc"
+    }
+    "NodeEnv": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
+    "Port": {
+      "type": "sst.sst.Secret"
+      "value": string
     }
   }
 }

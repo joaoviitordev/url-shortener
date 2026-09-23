@@ -76,6 +76,10 @@ await app.register(fastifySwagger, {
         description: "Localhost",
         url: `http://localhost:${env.PORT}`,
       },
+      {
+        description: "Production",
+        url: "https://bitly.fullstackclub.com.br",
+      },
     ],
   },
   transform: jsonSchemaTransform,
@@ -142,7 +146,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 try {
   await Promise.all([connectMongo(), connectRedis()]);
 
-  await app.listen({ host: env.HOST, port: env.PORT });
+  await app.listen({ host: "0.0.0.0", port: env.PORT });
   app.log.info(`API docs available at http://localhost:${env.PORT}/docs`);
 } catch (err) {
   app.log.error(err);
