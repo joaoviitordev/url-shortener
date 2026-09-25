@@ -154,10 +154,15 @@ Todas as respostas de erro seguem o mesmo formato:
 ├── test/                  # Testes de integração com Vitest (app.inject)
 ├── web/                   # Frontend React + Vite + TanStack Query
 │   └── src/
-│       ├── App.tsx        # Tela única: título, descrição, formulário e resultado
+│       ├── App.tsx        # Tela única: título, descrição e formulário
+│       ├── components/
+│       │   ├── icons.tsx           # Ícones SVG (sol, lua, copiar, abrir, alerta)
+│       │   ├── shortened-link.tsx  # Resultado: código em destaque, copiar e abrir
+│       │   └── theme-toggle.tsx    # Botão de modo claro/escuro
 │       ├── env.d.ts       # Tipagem de import.meta.env (VITE_API_URL)
 │       ├── hooks/
-│       │   └── use-shorten-url.ts  # useMutation que chama POST /api/shorten
+│       │   ├── use-shorten-url.ts  # useMutation que chama POST /api/shorten
+│       │   └── use-theme.ts        # Tema: sistema, localStorage e View Transitions
 │       └── lib/
 │           └── api.ts     # Cliente HTTP, tipos e mensagens de erro amigáveis
 ├── docker-compose.yml     # MongoDB 8 e Redis 8 locais
@@ -290,7 +295,15 @@ Multi-stage sobre `node:24-slim`:
 
 Tela única feita com **React 19**, **Vite 8**, **Tailwind CSS 4**, **TanStack Query 5** e **TypeScript 7** (mesma versão da API, com dependências em versões exatas). O envio do formulário dispara um `useMutation` que chama `POST /api/shorten` e exibe a URL curta com botão de copiar. URLs digitadas sem protocolo (ex.: `exemplo.com`) recebem `https://` automaticamente.
 
-Se o navegador bloquear a área de transferência (permissão negada ou página sem HTTPS), o link curto é selecionado e uma mensagem orienta a copiar com Ctrl+C.
+Se o navegador bloquear a área de transferência (permissão negada ou página sem HTTPS), o link curto aparece selecionado num campo e uma mensagem orienta a copiar com Ctrl+C.
+
+### Design
+
+- **Monocromático**, com tokens de cor em `web/src/index.css` (`canvas`, `ink`, `ink-secondary`, `hairline`, `fill`, `material`) redefinidos para o tema escuro em `:root[data-theme='dark']`.
+- **Fonte do sistema** (SF Pro no Apple, Segoe UI no Windows) e fonte mono do sistema para o código curto, que é o destaque da tela: o domínio fica pequeno e o código aparece em tamanho de título.
+- **Modo claro e escuro** pelo botão de sol e lua no canto superior direito. Sem escolha salva, segue o tema do sistema e acompanha mudanças dele; a escolha fica no `localStorage`. Um script inline no `index.html` aplica o tema antes da primeira pintura, então a página não pisca, e a troca faz um cross-fade com a View Transitions API.
+- **Movimento**: botões reagem no toque (`active:scale`), o resultado entra com uma animação de opacidade, deslocamento e desfoque e a página rola até ele em telas pequenas. Com `prefers-reduced-motion` tudo vira fade simples; com `prefers-reduced-transparency` o botão de tema perde o efeito de vidro.
+- A mensagem de servidor iniciando só aparece se a requisição demorar mais de 1,5 s.
 
 | Variável | Padrão | Descrição |
 | --- | --- | --- |
