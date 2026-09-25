@@ -1,3 +1,5 @@
 allowBuilds:
   esbuild: true
   mongodb-memory-server: false
+engineStrict: true
+saveExact: true

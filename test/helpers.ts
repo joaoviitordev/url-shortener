@@ -37,7 +37,11 @@ export const useTestApp = () => {
   return context;
 };
 
-export const shorten = (app: FastifyInstance, url: string, ip = nextClientIp()) =>
+export const shorten = (
+  app: FastifyInstance,
+  url: string,
+  ip = nextClientIp(),
+) =>
   app.inject({
     method: "POST",
     url: "/api/shorten",

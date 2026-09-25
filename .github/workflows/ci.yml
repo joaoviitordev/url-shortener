@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   api:
-    name: API (typecheck, test, build)
+    name: API (lint, typecheck, test, build)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -29,6 +29,10 @@ jobs:
         with:
           path: ~/.cache/mongodb-binaries
           key: mongodb-binaries-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - run: pnpm lint
+
+      - run: pnpm format:check
 
       - run: pnpm typecheck
 
@@ -55,6 +59,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm lint
+
+      - run: pnpm format:check
 
       - run: pnpm build
         env:
