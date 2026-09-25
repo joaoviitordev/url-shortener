@@ -26,6 +26,8 @@ export class ApiError extends Error {
 const friendlyMessageByCode: Record<string, string> = {
   VALIDATION_ERROR:
     'URL inválida. Informe um endereço completo, como https://exemplo.com/pagina.',
+  ALREADY_SHORTENED:
+    'Esse link já é uma URL encurtada por este serviço. Cole o endereço original.',
   RATE_LIMITED:
     'Você encurtou muitas URLs em pouco tempo. Aguarde um minuto e tente novamente.',
   INTERNAL_SERVER_ERROR:

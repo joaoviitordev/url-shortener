@@ -13,7 +13,7 @@ const RAISE_COUNTER_SCRIPT = `
 local current = tonumber(redis.call("GET", KEYS[1]) or "0")
 local floor = tonumber(ARGV[1])
 if current < floor then
-  redis.call("SET", KEYS[1], floor)
+  redis.call("SET", KEYS[1], ARGV[1])
   return floor
 end
 return current
@@ -32,7 +32,14 @@ export const syncCounter = async (): Promise<number> => {
   return Number(counter);
 };
 
-export const nextId = (): Promise<number> => redis.incr(COUNTER_KEY);
+export const nextId = async (): Promise<number> => {
+  const id = await redis.incr(COUNTER_KEY);
+
+  if (id >= COUNTER_START) return id;
+
+  await syncCounter();
+  return redis.incr(COUNTER_KEY);
+};
 
 export const isDuplicateKeyError = (error: unknown): boolean =>
   error instanceof MongoServerError &&

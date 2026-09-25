@@ -21,3 +21,13 @@ export const ShortenResponseSchema = z.object({
 export const RedirectParamsSchema = z.object({
   shortCode: z.string().min(1).max(64).describe("Base62 short code"),
 });
+
+const DependencyStatusSchema = z.enum(["up", "down"]);
+
+export const HealthSchema = z.object({
+  status: z.enum(["ok", "degraded"]),
+  mongo: DependencyStatusSchema,
+  redis: DependencyStatusSchema,
+});
+
+export type DependencyStatus = z.infer<typeof DependencyStatusSchema>;

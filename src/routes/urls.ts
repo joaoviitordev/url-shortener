@@ -1,4 +1,4 @@
-import { FastifyInstance } from "fastify";
+import { FastifyBaseLogger, FastifyInstance } from "fastify";
 import { ZodTypeProvider } from "fastify-type-provider-zod";
 import z from "zod";
 
@@ -6,6 +6,7 @@ import { isDuplicateKeyError, nextId, syncCounter } from "../lib/counter.js";
 import { env } from "../lib/env.js";
 import { decodeShortCode, encodeId } from "../lib/hashids.js";
 import { urlsCollection } from "../lib/mongo.js";
+import { cacheLongUrl, getCachedLongUrl } from "../lib/url-cache.js";
 import {
   ErrorSchema,
   RedirectParamsSchema,
@@ -38,6 +39,35 @@ const createShortUrl = async (longUrl: string): Promise<string> => {
   }
 };
 
+const shortenerHost = new URL(env.BASE_URL).host;
+
+const isShortenerUrl = (url: string) => new URL(url).host === shortenerHost;
+
+const findLongUrl = async (
+  id: number,
+  log: FastifyBaseLogger,
+): Promise<string | null> => {
+  const cached = await getCachedLongUrl(id).catch((error: unknown) => {
+    log.warn({ err: error }, "Failed to read URL cache");
+    return null;
+  });
+
+  if (cached) return cached;
+
+  const url = await urlsCollection.findOne(
+    { _id: id },
+    { projection: { longUrl: 1 } },
+  );
+
+  if (!url) return null;
+
+  await cacheLongUrl(id, url.longUrl).catch((error: unknown) => {
+    log.warn({ err: error }, "Failed to write URL cache");
+  });
+
+  return url.longUrl;
+};
+
 export const urlRoutes = async (app: FastifyInstance) => {
   app.withTypeProvider<ZodTypeProvider>().route({
     method: "POST",
@@ -62,6 +92,14 @@ export const urlRoutes = async (app: FastifyInstance) => {
     },
     handler: async (request, reply) => {
       const longUrl = request.body.url;
+
+      if (isShortenerUrl(longUrl)) {
+        return reply.status(400).send({
+          error: "URL is already a short URL from this service",
+          code: "ALREADY_SHORTENED",
+        });
+      }
+
       const shortCode = await createShortUrl(longUrl);
 
       return reply.status(201).send({
@@ -79,7 +117,7 @@ export const urlRoutes = async (app: FastifyInstance) => {
       tags: ["URLs"],
       summary: "Redirect to the long URL",
       description:
-        "Decodes the base62 short code back to the numeric ID with Hashids, looks it up in MongoDB and redirects with 301.",
+        "Decodes the base62 short code back to the numeric ID with Hashids, looks it up in the Redis cache or, on a miss, in MongoDB (caching the result) and redirects with 301.",
       params: RedirectParamsSchema,
       response: {
         301: z.null().describe("Redirect to the long URL (Location header)"),
@@ -96,18 +134,15 @@ export const urlRoutes = async (app: FastifyInstance) => {
           .send({ error: "Short URL not found", code: "NOT_FOUND" });
       }
 
-      const url = await urlsCollection.findOne(
-        { _id: id },
-        { projection: { longUrl: 1 } },
-      );
+      const longUrl = await findLongUrl(id, request.log);
 
-      if (!url) {
+      if (!longUrl) {
         return reply
           .status(404)
           .send({ error: "Short URL not found", code: "NOT_FOUND" });
       }
 
-      return reply.redirect(url.longUrl, 301);
+      return reply.redirect(longUrl, 301);
     },
   });
 };

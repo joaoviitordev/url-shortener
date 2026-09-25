@@ -1,5 +1,3 @@
-import "dotenv/config";
-
 import z from "zod";
 
 const envSchema = z.object({
@@ -27,6 +25,7 @@ const envSchema = z.object({
     .pipe(z.array(z.url()).min(1)),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
   SHORTEN_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
+  URL_CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(86_400),
 });
 
 const parsed = envSchema.safeParse({
