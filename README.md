@@ -2,8 +2,11 @@
 
 API de encurtamento de URLs construída com **Fastify**, **MongoDB**, **Redis** e **Hashids** (alfabeto base62). Roda localmente com Docker e tem deploy gratuito no **Render**, usando **MongoDB Atlas** e **Upstash Redis** nos planos free.
 
+Projeto desenvolvido na **Imersão Arquitetura de Software com IA**, com o professor **Felipe Rocha**.
+
 ## Sumário
 
+- [Sobre o projeto](#sobre-o-projeto)
 - [Stack](#stack)
 - [Como funciona](#como-funciona)
 - [Endpoints](#endpoints)
@@ -17,6 +20,39 @@ API de encurtamento de URLs construída com **Fastify**, **MongoDB**, **Redis** 
 - [Frontend (`web/`)](#frontend-web)
 - [Deploy gratuito (Render + Atlas + Upstash)](#deploy-gratuito-render--atlas--upstash)
 - [Observações](#observações)
+
+## Sobre o projeto
+
+Este encurtador foi construído durante a **Imersão Arquitetura de Software com IA**, ministrada pelo professor **Felipe Rocha**.
+
+### Arquitetura da imersão
+
+O desenho completo da arquitetura de backend proposta na imersão está neste diagrama:
+
+**[Diagrama da arquitetura no Excalidraw](https://excalidraw.com/#json=q7ablV91dlK-CoSIj8sbO,Q83nihOon9Mc6qwkcPUNsw)**
+
+A implementação deste repositório **se desvia desse diagrama**. O projeto seria publicado na AWS, mas foi adaptado para rodar inteiramente em planos gratuitos, sem custo com a AWS.
+
+### Da AWS para os planos gratuitos
+
+A primeira versão do repositório descrevia a infraestrutura na AWS com o [SST](https://sst.dev). Antes de ir ao ar, ela foi substituída pelo `render.yaml`; o código da aplicação é o mesmo nas duas versões:
+
+| Papel | Na AWS (planejado) | Na adaptação gratuita (em produção) |
+| --- | --- | --- |
+| Execução da API (container Docker) | Serviço no ECS com Fargate e Fargate Spot | Web service Docker no Render (plano free) |
+| Redis (contador de IDs e cache) | ElastiCache Redis dentro de uma VPC | Upstash Redis (plano free, acesso por TLS) |
+| MongoDB | MongoDB Atlas | MongoDB Atlas M0 (free) |
+| Entrada HTTP/HTTPS e domínio | Application Load Balancer + domínio no Route 53 | HTTPS e subdomínio `onrender.com` fornecidos pelo Render |
+| Rede privada | VPC | Não se aplica: Atlas e Upstash são acessados pela internet com TLS e autenticação |
+| Configuração e segredos | SST Secrets | Variáveis de ambiente do Render |
+| Frontend | Não fazia parte do plano | Static site no Render |
+
+O que se perde com a troca, em relação ao plano na AWS:
+
+- **Hibernação**: o serviço free do Render dorme após ~15 minutos sem tráfego e leva de 30 a 60 segundos para acordar. Na AWS, o serviço no ECS ficaria sempre de pé.
+- **Escala**: uma única instância, sem autoscaling nem capacidade Spot. O rate limit em memória e o contador no Redis já contemplam esse cenário.
+- **Rede**: MongoDB e Redis ficam fora de uma rede privada, protegidos só por credenciais e TLS (o Atlas precisa liberar `0.0.0.0/0`, porque o Render free não tem IP fixo).
+- **Limites**: armazenamento e requisições do Atlas M0 e do Upstash free são suficientes para estudo e uso pessoal, não para produção com tráfego alto.
 
 ## Stack
 
