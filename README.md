@@ -32,9 +32,10 @@ API de encurtamento de URLs construída com **Fastify**, **MongoDB**, **Redis** 
 | Códigos curtos | Hashids com alfabeto base62 |
 | Configuração | `--env-file-if-exists` do Node + validação com Zod |
 | Testes | Vitest + `mongodb-memory-server` + `ioredis-mock` |
+| Lint e formatação | oxlint + Prettier (API e web) |
 | CI | GitHub Actions |
 | Hospedagem | Render (Docker, plano free) |
-| Gerenciador de pacotes | pnpm 12.5.1 |
+| Gerenciador de pacotes | pnpm 12.5.1 (`engineStrict` e `saveExact` no `pnpm-workspace.yaml`) |
 
 ## Como funciona
 
@@ -166,6 +167,8 @@ Todas as respostas de erro seguem o mesmo formato:
 ├── vitest.config.ts       # Configuração e variáveis de ambiente dos testes
 ├── render.yaml            # Blueprint de deploy no Render
 ├── .env.example
+├── .oxlintrc.json         # Regras do oxlint da API
+├── .prettierrc.json       # Estilo do Prettier da API
 └── CLAUDE.md              # Regras de código do repositório
 ```
 
@@ -184,7 +187,6 @@ Lidas do ambiente do processo e validadas em `src/lib/env.ts`. Os scripts `dev` 
 | `MONGO_MAX_POOL_SIZE` | `100` | Tamanho máximo do pool do MongoDB |
 | `REDIS_URL` | obrigatório | URL do Redis (`redis://` sem TLS ou `rediss://` com TLS) |
 | `HASHIDS_SALT` | obrigatório | Salt do Hashids (mudar invalida todos os códigos existentes) |
-| `HASHIDS_MIN_LENGTH` | `7` | Validado, mas atualmente não usado (ver [Observações](#observações)) |
 | `CORS_ORIGIN` | `http://localhost:3000` | Origens liberadas no CORS, separadas por vírgula (barra final é removida) |
 | `RATE_LIMIT_MAX` | `100` | Requisições por minuto por IP em todas as rotas |
 | `SHORTEN_RATE_LIMIT_MAX` | `10` | Requisições por minuto por IP em `POST /api/shorten` |
@@ -224,6 +226,13 @@ A API sobe em `http://localhost:3333` e a documentação fica em `http://localho
 | `test` | `vitest run` | Roda os testes uma vez |
 | `test:watch` | `vitest` | Roda os testes em modo watch |
 | `typecheck` | `tsc --noEmit` | Verificação de tipos |
+| `lint` | `oxlint` | Lint de `src/` e `test/` |
+| `format` | `prettier --write src test vitest.config.ts` | Formata o código |
+| `format:check` | `prettier --check src test vitest.config.ts` | Confere a formatação sem alterar arquivos |
+
+O `web/` tem os mesmos `lint`, `format` e `format:check`. A API usa aspas duplas com ponto e vírgula e o web usa aspas simples sem ponto e vírgula, cada um com seu `.prettierrc.json`. Ambos usam `endOfLine: "auto"` para conviver com o `core.autocrlf` do Git no Windows.
+
+O `pnpm-workspace.yaml` da raiz e o do `web/` ativam `engineStrict` (recusa instalar com um Node fora de `24.x`) e `saveExact` (novas dependências entram com versão exata). A partir do pnpm 11, essas opções não são mais lidas do `.npmrc`.
 
 ## Testes
 
@@ -244,8 +253,8 @@ O workflow `.github/workflows/ci.yml` roda em todo pull request e em push na `ma
 
 | Job | O que faz |
 | --- | --- |
-| API | `pnpm typecheck`, `pnpm test` e `pnpm build` |
-| Web | `pnpm lint` e `pnpm build` em `web/` |
+| API | `pnpm lint`, `pnpm format:check`, `pnpm typecheck`, `pnpm test` e `pnpm build` |
+| Web | `pnpm lint`, `pnpm format:check` e `pnpm build` em `web/` |
 | Docker image | Builda a imagem, sobe o container contra MongoDB e Redis reais, espera o `/api/health` responder e testa o fluxo de encurtar e redirecionar com `curl` |
 
 Os dois serviços do `render.yaml` usam `autoDeployTrigger: checksPass`, então o Render só faz deploy de um commit na `main` depois que o CI passa.
@@ -334,5 +343,6 @@ O Render pode acrescentar um sufixo ao subdomínio (ex.: `url-shortener-lchk.onr
 
 - **Salt**: trocar o `HASHIDS_SALT` depois de haver URLs cadastradas quebra todos os links existentes. Guarde o valor gerado pelo Render.
 - **Contador**: o `url:counter` se recupera sozinho se o Redis for zerado (ver [Contador inicial](#contador-inicial)), às custas de uma consulta extra ao MongoDB na inicialização ou na primeira colisão.
-- **`HASHIDS_MIN_LENGTH`**: é validado em `env.ts`, mas `hashids.ts` fixa o tamanho mínimo em `0`. O tamanho dos códigos é controlado pelo valor inicial do contador.
+- **Tamanho dos códigos**: o Hashids usa tamanho mínimo `0`, e o tamanho dos códigos é controlado pelo valor inicial do contador. Não dá para passar a usar um tamanho mínimo depois de haver links cadastrados: o Hashids valida cada código gerando-o de novo a partir do ID, então os códigos antigos deixariam de ser reconhecidos.
+- **Rotas fixas x códigos curtos**: o Hashids reserva `c`, `f`, `h`, `i`, `s`, `t` e `u` (maiúsculas e minúsculas) como separadores, e códigos de um único número nunca contêm essas letras. Por isso nenhum código gerado colide com `/docs` nem com outras rotas que usem essas letras.
 - **Regras de código**: conforme o `CLAUDE.md`, o código não deve conter comentários.
