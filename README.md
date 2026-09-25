@@ -12,6 +12,7 @@ API de encurtamento de URLs construída com **Fastify**, **MongoDB**, **Redis** 
 - [Rodando localmente](#rodando-localmente)
 - [Scripts](#scripts)
 - [Docker](#docker)
+- [Frontend (`web/`)](#frontend-web)
 - [Deploy gratuito (Render + Atlas + Upstash)](#deploy-gratuito-render--atlas--upstash)
 - [Observações](#observações)
 
@@ -21,7 +22,7 @@ API de encurtamento de URLs construída com **Fastify**, **MongoDB**, **Redis** 
 | --- | --- |
 | Runtime | Node.js 24 (ESM) |
 | Linguagem | TypeScript 7 (`strict`, `module: nodenext`) |
-| HTTP | Fastify 5 + `@fastify/cors` |
+| HTTP | Fastify 5 + `@fastify/cors` + `@fastify/rate-limit` |
 | Validação | Zod 4 + `fastify-type-provider-zod` |
 | Documentação | `@fastify/swagger` (OpenAPI) + Scalar (`/docs`) |
 | Banco de dados | MongoDB (driver oficial 7) |
@@ -49,7 +50,20 @@ API de encurtamento de URLs construída com **Fastify**, **MongoDB**, **Redis** 
 
 ### Contador inicial
 
-Na inicialização, `connectRedis` executa `SET url:counter 238327 NX`, ou seja, só define o valor se a chave ainda não existir. O primeiro ID gerado é `238328` (= 62³), o que garante que os códigos já nasçam com pelo menos 4 caracteres.
+Na inicialização, `syncCounter` busca o maior `_id` salvo no MongoDB e, com um script Lua atômico, eleva `url:counter` para `max(maior _id, 238327)` quando o valor atual é menor. Em banco vazio o primeiro ID gerado é `238328` (= 62³), o que garante que os códigos já nasçam com pelo menos 4 caracteres.
+
+Se mesmo assim um `insertOne` falhar com chave duplicada (por exemplo, o Redis foi zerado com a API rodando), o contador é ressincronizado e a inserção é refeita uma vez com um novo ID.
+
+### Rate limiting
+
+Feito com `@fastify/rate-limit` em memória, por IP, em janelas de 1 minuto:
+
+| Escopo | Limite padrão | Variável |
+| --- | --- | --- |
+| Todas as rotas (exceto o health check `/`) | 100 req/min | `RATE_LIMIT_MAX` |
+| `POST /api/shorten` | 10 req/min | `SHORTEN_RATE_LIMIT_MAX` |
+
+Ao exceder, a API responde `429` com `code: "RATE_LIMITED"` e o header `retry-after`. Em produção o Fastify usa `trustProxy`, para que o IP considerado seja o do cliente e não o do proxy do Render. Como o contador fica em memória, cada instância tem seus próprios limites, o que basta para a instância única do plano free.
 
 ### Modelo do documento
 
@@ -101,6 +115,7 @@ Todas as respostas de erro seguem o mesmo formato:
 | `400` | `VALIDATION_ERROR` | Falha na validação do Zod (body/params) |
 | `4xx` | código do erro ou `BAD_REQUEST` | Outros erros de cliente lançados pelo Fastify |
 | `404` | `NOT_FOUND` | Código curto inválido ou inexistente |
+| `429` | `RATE_LIMITED` | Limite de requisições por IP excedido |
 | `500` | `INTERNAL_SERVER_ERROR` | Erro não tratado (é logado; detalhes não são expostos) |
 
 ## Estrutura do projeto
@@ -110,14 +125,22 @@ Todas as respostas de erro seguem o mesmo formato:
 ├── src/
 │   ├── index.ts           # Bootstrap do Fastify, plugins, error handler, health check e shutdown
 │   ├── lib/
+│   │   ├── counter.ts     # Contador de IDs: INCR, sincronização com o MongoDB e detecção de chave duplicada
 │   │   ├── env.ts         # Carrega o .env e valida as variáveis com Zod
 │   │   ├── hashids.ts     # encodeId / decodeShortCode com alfabeto base62
 │   │   ├── mongo.ts       # MongoClient, coleção `urls` e tipo UrlDocument
-│   │   └── redis.ts       # Cliente Redis, chave e valor inicial do contador
+│   │   └── redis.ts       # Cliente Redis
 │   ├── routes/
 │   │   └── urls.ts        # POST /api/shorten e GET /:shortCode
 │   └── schemas/
 │       └── index.ts       # Schemas Zod de body, params, resposta e erro
+├── web/                   # Frontend React + Vite + TanStack Query
+│   └── src/
+│       ├── App.tsx        # Tela única: título, descrição, formulário e resultado
+│       ├── hooks/
+│       │   └── use-shorten-url.ts  # useMutation que chama POST /api/shorten
+│       └── lib/
+│           └── api.ts     # Cliente HTTP, tipos e mensagens de erro amigáveis
 ├── docker-compose.yml     # MongoDB 8 e Redis 8 locais
 ├── Dockerfile             # Imagem da aplicação (Node 24)
 ├── render.yaml            # Blueprint de deploy no Render
@@ -141,10 +164,13 @@ Carregadas do `.env` (via `dotenv`) ou do ambiente do processo e validadas em `s
 | `REDIS_URL` | obrigatório | URL do Redis (`redis://` sem TLS ou `rediss://` com TLS) |
 | `HASHIDS_SALT` | obrigatório | Salt do Hashids (mudar invalida todos os códigos existentes) |
 | `HASHIDS_MIN_LENGTH` | `7` | Validado, mas atualmente não usado (ver [Observações](#observações)) |
+| `CORS_ORIGIN` | `http://localhost:3000` | Origens liberadas no CORS, separadas por vírgula (barra final é removida) |
+| `RATE_LIMIT_MAX` | `100` | Requisições por minuto por IP em todas as rotas |
+| `SHORTEN_RATE_LIMIT_MAX` | `10` | Requisições por minuto por IP em `POST /api/shorten` |
 
 \* No Render, se `BASE_URL` não for definida, é usada a `RENDER_EXTERNAL_URL` que a plataforma fornece.
 
-Em desenvolvimento os logs usam `pino-pretty`; em produção são JSON puro. O CORS aceita apenas `http://localhost:3000` (com credentials).
+Em desenvolvimento os logs usam `pino-pretty`; em produção são JSON puro. O CORS aceita apenas as origens de `CORS_ORIGIN`.
 
 ## Rodando localmente
 
@@ -196,6 +222,23 @@ docker compose down
 
 Baseada em `node:24`: instala as dependências com pnpm, roda o build e inicia com `node dist/index.js`. É a imagem usada pelo Render.
 
+## Frontend (`web/`)
+
+Tela única feita com **React 19**, **Vite 8**, **Tailwind CSS 4** e **TanStack Query 5**. O envio do formulário dispara um `useMutation` que chama `POST /api/shorten` e exibe a URL curta com botão de copiar. URLs digitadas sem protocolo (ex.: `exemplo.com`) recebem `https://` automaticamente.
+
+| Variável | Padrão | Descrição |
+| --- | --- | --- |
+| `VITE_API_URL` | `https://url-shortener-lchk.onrender.com` | URL base da API |
+
+```bash
+cd web
+cp .env.example .env
+pnpm install
+pnpm dev
+```
+
+O dev server roda em `http://localhost:3000`, que é o valor padrão de `CORS_ORIGIN` na API. Para usar a API local, defina `VITE_API_URL=http://localhost:3333` no `web/.env`.
+
 ## Deploy gratuito (Render + Atlas + Upstash)
 
 ### 1. MongoDB Atlas
@@ -213,14 +256,15 @@ Baseada em `node:24`: instala as dependências com pnpm, roda o build e inicia c
 ### 3. Render
 
 1. Suba o repositório para o GitHub.
-2. No [Render](https://render.com), clique em **New > Blueprint** e selecione o repositório. O `render.yaml` cria um web service Docker no plano free com:
-   - `NODE_ENV=production`, `MONGO_DB_NAME` e `MONGO_MAX_POOL_SIZE` fixos;
-   - `HASHIDS_SALT` gerado automaticamente;
-   - `MONGO_URL` e `REDIS_URL` solicitados na criação;
-   - health check em `/` e deploy automático a cada push.
-3. Preencha `MONGO_URL` e `REDIS_URL` e confirme.
+2. No [Render](https://render.com), clique em **New > Blueprint** e selecione o repositório. O `render.yaml` cria dois serviços no plano free:
+   - **`url-shortener`** (API, Docker): `NODE_ENV=production`, `MONGO_DB_NAME` e `MONGO_MAX_POOL_SIZE` fixos; `HASHIDS_SALT` gerado automaticamente; `MONGO_URL`, `REDIS_URL` e `CORS_ORIGIN` solicitados na criação; health check em `/`; mudanças apenas em `web/` ou em arquivos `.md` não disparam deploy.
+   - **`url-shortener-web`** (frontend, static site): build com `pnpm build` a partir de `web/`, publica `web/dist` na CDN do Render com headers de segurança e cache longo para `/assets/*`; `VITE_API_URL` solicitado na criação; só faz deploy quando algo em `web/` muda.
+3. Preencha as variáveis e confirme:
+   - `MONGO_URL` e `REDIS_URL`: strings de conexão do Atlas e do Upstash;
+   - `CORS_ORIGIN`: URL do frontend, ex.: `https://url-shortener-web.onrender.com`;
+   - `VITE_API_URL`: URL da API, ex.: `https://url-shortener.onrender.com`.
 
-A API fica em `https://<nome-do-serviço>.onrender.com`. Para usar um domínio próprio, configure-o no Render e defina `BASE_URL` com ele.
+O Render pode acrescentar um sufixo ao subdomínio (ex.: `url-shortener-lchk.onrender.com`). Depois da primeira criação, confira as URLs reais no painel e, se forem diferentes, corrija `CORS_ORIGIN` na API e `VITE_API_URL` no frontend. Essa última é embutida no build, então exige um novo deploy do static site. Para usar um domínio próprio, configure-o no Render e defina `BASE_URL` com ele.
 
 ### Limitações do plano free
 
@@ -230,6 +274,6 @@ A API fica em `https://<nome-do-serviço>.onrender.com`. Para usar um domínio p
 ## Observações
 
 - **Salt**: trocar o `HASHIDS_SALT` depois de haver URLs cadastradas quebra todos os links existentes. Guarde o valor gerado pelo Render.
-- **Contador**: o `url:counter` precisa persistir. Se o Redis for zerado, o contador volta para `238327` e as próximas inserções colidem com `_id` já existentes no MongoDB.
+- **Contador**: o `url:counter` se recupera sozinho se o Redis for zerado (ver [Contador inicial](#contador-inicial)), às custas de uma consulta extra ao MongoDB na inicialização ou na primeira colisão.
 - **`HASHIDS_MIN_LENGTH`**: é validado em `env.ts`, mas `hashids.ts` fixa o tamanho mínimo em `0`. O tamanho dos códigos é controlado pelo valor inicial do contador.
 - **Regras de código**: conforme o `CLAUDE.md`, o código não deve conter comentários.

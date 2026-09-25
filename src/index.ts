@@ -1,6 +1,7 @@
 import { env } from "./lib/env.js";
 
 import fastifyCors from "@fastify/cors";
+import fastifyRateLimit from "@fastify/rate-limit";
 import fastifySwagger from "@fastify/swagger";
 import fastifyApiReference from "@scalar/fastify-api-reference";
 import Fastify from "fastify";
@@ -13,11 +14,13 @@ import {
 } from "fastify-type-provider-zod";
 import z from "zod";
 
+import { syncCounter } from "./lib/counter.js";
 import { connectMongo, mongoClient } from "./lib/mongo.js";
 import { connectRedis, redis } from "./lib/redis.js";
 import { urlRoutes } from "./routes/urls.js";
 
 const app = Fastify({
+  trustProxy: env.NODE_ENV === "production",
   logger:
     env.NODE_ENV === "production"
       ? true
@@ -82,8 +85,19 @@ await app.register(fastifySwagger, {
 });
 
 await app.register(fastifyCors, {
-  origin: ["http://localhost:3000"],
-  credentials: true,
+  origin: env.CORS_ORIGIN,
+});
+
+await app.register(fastifyRateLimit, {
+  max: env.RATE_LIMIT_MAX,
+  timeWindow: "1 minute",
+  errorResponseBuilder: (_request, context) =>
+    Object.assign(
+      new Error(
+        `Too many requests, please try again in ${context.after}`,
+      ),
+      { statusCode: context.statusCode, code: "RATE_LIMITED" },
+    ),
 });
 
 await app.register(fastifyApiReference, {
@@ -113,6 +127,9 @@ app.withTypeProvider<ZodTypeProvider>().route({
 app.withTypeProvider<ZodTypeProvider>().route({
   method: "GET",
   url: "/",
+  config: {
+    rateLimit: false,
+  },
   schema: {
     description: "Health check",
     tags: ["Health"],
@@ -141,6 +158,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 
 try {
   await Promise.all([connectMongo(), connectRedis()]);
+  const counter = await syncCounter();
+  app.log.info(`URL counter synced at ${counter}`);
 
   await app.listen({ host: env.HOST, port: env.PORT });
   app.log.info(`API docs available at http://localhost:${env.PORT}/docs`);

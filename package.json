@@ -22,6 +22,7 @@
   "packageManager": "pnpm@12.5.1",
   "dependencies": {
     "@fastify/cors": "11.3.0",
+    "@fastify/rate-limit": "11.2.0",
     "@fastify/swagger": "9.8.2",
     "@scalar/fastify-api-reference": "1.70.0",
     "dotenv": "18.0.2",

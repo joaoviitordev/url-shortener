@@ -2,10 +2,10 @@ import { FastifyInstance } from "fastify";
 import { ZodTypeProvider } from "fastify-type-provider-zod";
 import z from "zod";
 
+import { isDuplicateKeyError, nextId, syncCounter } from "../lib/counter.js";
 import { env } from "../lib/env.js";
 import { decodeShortCode, encodeId } from "../lib/hashids.js";
 import { urlsCollection } from "../lib/mongo.js";
-import { COUNTER_KEY, redis } from "../lib/redis.js";
 import {
   ErrorSchema,
   RedirectParamsSchema,
@@ -13,10 +13,41 @@ import {
   ShortenResponseSchema,
 } from "../schemas/index.js";
 
+const insertShortUrl = async (longUrl: string): Promise<string> => {
+  const id = await nextId();
+  const shortCode = encodeId(id);
+
+  await urlsCollection.insertOne({
+    _id: id,
+    shortCode,
+    longUrl,
+    createdAt: new Date(),
+  });
+
+  return shortCode;
+};
+
+const createShortUrl = async (longUrl: string): Promise<string> => {
+  try {
+    return await insertShortUrl(longUrl);
+  } catch (error) {
+    if (!isDuplicateKeyError(error)) throw error;
+
+    await syncCounter();
+    return insertShortUrl(longUrl);
+  }
+};
+
 export const urlRoutes = async (app: FastifyInstance) => {
   app.withTypeProvider<ZodTypeProvider>().route({
     method: "POST",
     url: "/api/shorten",
+    config: {
+      rateLimit: {
+        max: env.SHORTEN_RATE_LIMIT_MAX,
+        timeWindow: "1 minute",
+      },
+    },
     schema: {
       tags: ["URLs"],
       summary: "Shorten a long URL",
@@ -26,20 +57,12 @@ export const urlRoutes = async (app: FastifyInstance) => {
       response: {
         201: ShortenResponseSchema.describe("Short URL created"),
         400: ErrorSchema,
+        429: ErrorSchema,
       },
     },
     handler: async (request, reply) => {
       const longUrl = request.body.url;
-
-      const id = await redis.incr(COUNTER_KEY);
-      const shortCode = encodeId(id);
-
-      await urlsCollection.insertOne({
-        _id: id,
-        shortCode,
-        longUrl,
-        createdAt: new Date(),
-      });
+      const shortCode = await createShortUrl(longUrl);
 
       return reply.status(201).send({
         shortCode,
@@ -61,6 +84,7 @@ export const urlRoutes = async (app: FastifyInstance) => {
       response: {
         301: z.null().describe("Redirect to the long URL (Location header)"),
         404: ErrorSchema,
+        429: ErrorSchema,
       },
     },
     handler: async (request, reply) => {
