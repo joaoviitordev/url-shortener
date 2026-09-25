@@ -32,7 +32,12 @@ function App() {
     event.preventDefault()
     const trimmedUrl = longUrl.trim()
     if (!trimmedUrl) return
-    mutate(withProtocol(trimmedUrl))
+    mutate(withProtocol(trimmedUrl), {
+      onSuccess: () => {
+        setLongUrl('')
+        inputRef.current?.blur()
+      },
+    })
   }
 
   const handleReset = () => {
@@ -45,18 +50,20 @@ function App() {
     <>
       <ThemeToggle theme={theme} onToggle={toggleTheme} />
 
-      <main className="mx-auto flex min-h-dvh w-full max-w-[40rem] flex-col justify-center px-6 py-24">
-        <h1 className="text-[clamp(2.75rem,9vw,4.5rem)] leading-[1.02] font-semibold tracking-[-0.035em] text-balance">
+      <main className="mx-auto flex min-h-dvh w-full max-w-[40rem] flex-col justify-center px-6 py-12 short:py-6">
+        <h1 className="text-[clamp(2.5rem,8vw,3.5rem)] leading-[1.05] font-semibold tracking-[-0.035em] text-balance">
           Encurte qualquer link.
         </h1>
-        <p className="mt-5 max-w-[40ch] text-[19px] leading-[1.45] text-ink-secondary">
+        <p
+          className={`mt-5 max-w-[40ch] short:mt-3 text-[19px] leading-[1.45] text-ink-secondary ${isSuccess ? 'tiny:hidden' : ''}`}
+        >
           Cole o endereço completo e receba um link curto, pronto para copiar e
           compartilhar.
         </p>
 
         <form
           onSubmit={handleSubmit}
-          className="mt-10 flex items-center gap-2 rounded-[1.375rem] bg-fill p-1.5 pl-5 ring-transparent ring-inset transition-shadow focus-within:ring-[1.5px] focus-within:ring-ink/50"
+          className="mt-8 flex items-center gap-2 rounded-[1.375rem] short:mt-6 bg-fill p-1.5 pl-5 ring-transparent ring-inset transition-shadow focus-within:ring-[1.5px] focus-within:ring-ink/50"
         >
           <label htmlFor="long-url" className="sr-only">
             Endereço para encurtar
@@ -66,7 +73,7 @@ function App() {
             id="long-url"
             type="text"
             inputMode="url"
-            autoComplete="url"
+            autoComplete="off"
             autoCapitalize="none"
             spellCheck={false}
             autoFocus

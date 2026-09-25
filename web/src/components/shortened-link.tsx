@@ -54,9 +54,9 @@ export function ShortenedLink({ link, onReset }: ShortenedLinkProps) {
     <section
       ref={sectionRef}
       aria-labelledby="short-link-label"
-      className="mt-16 animate-materialize motion-reduce:animate-fade-in"
+      className="mt-12 animate-materialize short:mt-8 motion-reduce:animate-fade-in"
     >
-      <p id="short-link-label" className="text-sm text-ink-secondary">
+      <p id="short-link-label" className="sr-only">
         Link curto
       </p>
 
@@ -64,17 +64,17 @@ export function ShortenedLink({ link, onReset }: ShortenedLinkProps) {
         href={link.shortUrl}
         target="_blank"
         rel="noreferrer"
-        className="mt-3 block w-fit max-w-full rounded-lg focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink"
+        className="block w-fit max-w-full rounded-lg focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink"
       >
         <span className="block truncate font-mono text-[15px] text-ink-secondary">
           {hostPrefix(link)}
         </span>
-        <span className="block font-mono text-[clamp(3.5rem,16vw,6.5rem)] leading-[1.05] font-medium tracking-[-0.03em] break-all text-ink">
+        <span className="block font-mono text-[clamp(3rem,14vw,5rem)] leading-[1.05] font-medium tracking-[-0.03em] break-all text-ink">
           {link.shortCode}
         </span>
       </a>
 
-      <div className="mt-8 flex flex-wrap items-center gap-3">
+      <div className="mt-6 flex flex-wrap items-center gap-3">
         <button
           type="button"
           onClick={handleCopy}
@@ -130,13 +130,16 @@ export function ShortenedLink({ link, onReset }: ShortenedLinkProps) {
         </div>
       )}
 
-      <dl className="mt-12 border-t border-hairline pt-5 text-sm">
-        <dt className="text-ink-secondary">Original</dt>
-        <dd className="mt-1 truncate text-ink" title={link.longUrl}>
+      <dl className="mt-8 grid grid-cols-[1fr_auto] short:mt-6 gap-x-4 border-t border-hairline pt-4 text-sm">
+        <dt className="col-start-1 row-start-1 text-ink-secondary">Original</dt>
+        <dd
+          className="col-span-2 row-start-2 mt-1 truncate text-ink"
+          title={link.longUrl}
+        >
           {link.longUrl}
         </dd>
         <dt className="sr-only">Tamanho</dt>
-        <dd className="mt-3 font-mono text-xs text-ink-secondary">
+        <dd className="col-start-2 row-start-1 self-center font-mono text-xs text-ink-secondary">
           {link.longUrl.length} → {link.shortUrl.length} caracteres
         </dd>
       </dl>

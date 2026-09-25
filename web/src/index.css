@@ -1,5 +1,8 @@
 @import 'tailwindcss';
 
+@custom-variant short (@media (max-height: 700px));
+@custom-variant tiny (@media (max-height: 600px));
+
 :root {
   --canvas: #fbfbfd;
   --ink: #1d1d1f;
@@ -62,6 +65,12 @@
     background-color: var(--fill);
     backdrop-filter: none;
   }
+}
+
+input:-webkit-autofill {
+  -webkit-text-fill-color: var(--ink);
+  caret-color: var(--ink);
+  box-shadow: 0 0 0 100vmax var(--fill) inset;
 }
 
 body {
