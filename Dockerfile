@@ -5,5 +5,5 @@ COPY package*.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install
 COPY . .
 RUN pnpm run build
-EXPOSE 8080
+EXPOSE 3333
 CMD ["node", "dist/index.js"]
