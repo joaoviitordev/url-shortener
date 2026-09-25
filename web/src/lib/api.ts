@@ -1,6 +1,9 @@
-const API_URL = (
-  import.meta.env.VITE_API_URL ?? 'https://url-shortener-lchk.onrender.com'
-).replace(/\/+$/, '')
+const LOCAL_API_URL = 'http://localhost:3333'
+
+const API_URL = (import.meta.env.VITE_API_URL ?? LOCAL_API_URL).replace(
+  /\/+$/,
+  '',
+)
 
 export type ShortenedUrl = {
   shortCode: string
