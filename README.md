@@ -11,6 +11,8 @@ API de encurtamento de URLs construída com **Fastify**, **MongoDB**, **Redis** 
 - [Variáveis de ambiente](#variáveis-de-ambiente)
 - [Rodando localmente](#rodando-localmente)
 - [Scripts](#scripts)
+- [Testes](#testes)
+- [CI](#ci)
 - [Docker](#docker)
 - [Frontend (`web/`)](#frontend-web)
 - [Deploy gratuito (Render + Atlas + Upstash)](#deploy-gratuito-render--atlas--upstash)
@@ -22,13 +24,15 @@ API de encurtamento de URLs construída com **Fastify**, **MongoDB**, **Redis** 
 | --- | --- |
 | Runtime | Node.js 24 (ESM) |
 | Linguagem | TypeScript 7 (`strict`, `module: nodenext`) |
-| HTTP | Fastify 5 + `@fastify/cors` + `@fastify/rate-limit` |
+| HTTP | Fastify 5 + `@fastify/cors` + `@fastify/rate-limit` + `@fastify/helmet` |
 | Validação | Zod 4 + `fastify-type-provider-zod` |
 | Documentação | `@fastify/swagger` (OpenAPI) + Scalar (`/docs`) |
 | Banco de dados | MongoDB (driver oficial 7) |
-| Contador de IDs | Redis (ioredis) |
+| Contador de IDs e cache | Redis (ioredis) |
 | Códigos curtos | Hashids com alfabeto base62 |
-| Configuração | `dotenv` + validação com Zod |
+| Configuração | `--env-file-if-exists` do Node + validação com Zod |
+| Testes | Vitest + `mongodb-memory-server` + `ioredis-mock` |
+| CI | GitHub Actions |
 | Hospedagem | Render (Docker, plano free) |
 | Gerenciador de pacotes | pnpm 12.5.1 |
 
@@ -37,22 +41,29 @@ API de encurtamento de URLs construída com **Fastify**, **MongoDB**, **Redis** 
 ### Encurtar (`POST /api/shorten`)
 
 1. O corpo é validado com Zod: a URL precisa ser `http` ou `https`, é normalizada e tem no máximo 2048 caracteres.
-2. O Redis gera um ID numérico único e sequencial com `INCR url:counter`.
-3. O ID é convertido em um código curto com Hashids (alfabeto `0-9a-zA-Z` + salt secreto), o que ofusca a sequência.
-4. O documento é salvo na coleção `urls` do MongoDB, usando o próprio ID numérico como `_id`.
-5. A resposta retorna `201` com `shortCode`, `shortUrl` (`BASE_URL/shortCode`) e `longUrl`.
+2. URLs cujo host é o do próprio `BASE_URL` são recusadas com `400 ALREADY_SHORTENED`, o que evita links que redirecionam para si mesmos.
+3. O Redis gera um ID numérico único e sequencial com `INCR url:counter`.
+4. O ID é convertido em um código curto com Hashids (alfabeto `0-9a-zA-Z` + salt secreto), o que ofusca a sequência.
+5. O documento é salvo na coleção `urls` do MongoDB, usando o próprio ID numérico como `_id`.
+6. A resposta retorna `201` com `shortCode`, `shortUrl` (`BASE_URL/shortCode`) e `longUrl`.
 
 ### Redirecionar (`GET /:shortCode`)
 
 1. O código é decodificado com Hashids de volta para o ID numérico. Códigos inválidos, com múltiplos números ou fora do intervalo de inteiros seguros retornam `404` sem consultar o banco.
-2. O MongoDB é consultado pelo `_id` (busca pela chave primária, sem índice extra).
-3. Se encontrado, responde `301` com o header `Location` apontando para a URL original; caso contrário, `404`.
+2. A URL original é buscada no cache do Redis (chave `url:<id>`).
+3. Em caso de cache miss, o MongoDB é consultado pelo `_id` (busca pela chave primária, sem índice extra) e o resultado é gravado no cache com TTL de `URL_CACHE_TTL_SECONDS` (padrão 24 h).
+4. Se encontrada, responde `301` com o header `Location` apontando para a URL original; caso contrário, `404`.
+
+Falhas de leitura ou escrita no cache são apenas logadas: o redirecionamento continua funcionando direto pelo MongoDB.
 
 ### Contador inicial
 
 Na inicialização, `syncCounter` busca o maior `_id` salvo no MongoDB e, com um script Lua atômico, eleva `url:counter` para `max(maior _id, 238327)` quando o valor atual é menor. Em banco vazio o primeiro ID gerado é `238328` (= 62³), o que garante que os códigos já nasçam com pelo menos 4 caracteres.
 
-Se mesmo assim um `insertOne` falhar com chave duplicada (por exemplo, o Redis foi zerado com a API rodando), o contador é ressincronizado e a inserção é refeita uma vez com um novo ID.
+Com a API rodando, dois casos são cobertos:
+
+- **Contador perdido** (Redis zerado): o `INCR` recomeça em `1`. Todo ID abaixo de `238328` é descartado, o contador é ressincronizado e um novo `INCR` é feito.
+- **Contador atrasado** (ex.: restaurado de um backup antigo): o `insertOne` falha com chave duplicada, o contador é ressincronizado e a inserção é refeita uma vez com um novo ID.
 
 ### Rate limiting
 
@@ -80,7 +91,8 @@ interface UrlDocument {
 
 | Método | Rota | Descrição |
 | --- | --- | --- |
-| `GET` | `/` | Health check, retorna `{ "message": "Hello World" }` |
+| `GET` | `/` | Liveness: responde enquanto o processo estiver de pé, sem tocar em MongoDB ou Redis (usado pelo health check do Render) |
+| `GET` | `/api/health` | Readiness: faz ping no MongoDB e no Redis (timeout de 2 s) e responde `200` ou `503` com `{ status, mongo, redis }` |
 | `POST` | `/api/shorten` | Cria uma URL curta |
 | `GET` | `/:shortCode` | Redireciona (301) para a URL original |
 | `GET` | `/docs` | Referência interativa da API (Scalar) |
@@ -113,6 +125,7 @@ Todas as respostas de erro seguem o mesmo formato:
 | Status | `code` | Quando |
 | --- | --- | --- |
 | `400` | `VALIDATION_ERROR` | Falha na validação do Zod (body/params) |
+| `400` | `ALREADY_SHORTENED` | A URL enviada já é do próprio encurtador |
 | `4xx` | código do erro ou `BAD_REQUEST` | Outros erros de cliente lançados pelo Fastify |
 | `404` | `NOT_FOUND` | Código curto inválido ou inexistente |
 | `429` | `RATE_LIMITED` | Limite de requisições por IP excedido |
@@ -123,17 +136,21 @@ Todas as respostas de erro seguem o mesmo formato:
 ```
 .
 ├── src/
-│   ├── index.ts           # Bootstrap do Fastify, plugins, error handler, health check e shutdown
+│   ├── app.ts             # buildApp(): instância do Fastify com plugins, error handler e rotas
+│   ├── index.ts           # Bootstrap: conexões, sincronização do contador, listen e shutdown
 │   ├── lib/
 │   │   ├── counter.ts     # Contador de IDs: INCR, sincronização com o MongoDB e detecção de chave duplicada
-│   │   ├── env.ts         # Carrega o .env e valida as variáveis com Zod
+│   │   ├── env.ts         # Valida as variáveis de ambiente com Zod
 │   │   ├── hashids.ts     # encodeId / decodeShortCode com alfabeto base62
 │   │   ├── mongo.ts       # MongoClient, coleção `urls` e tipo UrlDocument
-│   │   └── redis.ts       # Cliente Redis
+│   │   ├── redis.ts       # Cliente Redis
+│   │   └── url-cache.ts   # Cache das URLs originais no Redis
 │   ├── routes/
+│   │   ├── health.ts      # GET / (liveness) e GET /api/health (readiness)
 │   │   └── urls.ts        # POST /api/shorten e GET /:shortCode
 │   └── schemas/
-│       └── index.ts       # Schemas Zod de body, params, resposta e erro
+│       └── index.ts       # Schemas Zod de body, params, resposta, health e erro
+├── test/                  # Testes de integração com Vitest (app.inject)
 ├── web/                   # Frontend React + Vite + TanStack Query
 │   └── src/
 │       ├── App.tsx        # Tela única: título, descrição, formulário e resultado
@@ -142,7 +159,10 @@ Todas as respostas de erro seguem o mesmo formato:
 │       └── lib/
 │           └── api.ts     # Cliente HTTP, tipos e mensagens de erro amigáveis
 ├── docker-compose.yml     # MongoDB 8 e Redis 8 locais
-├── Dockerfile             # Imagem da aplicação (Node 24)
+├── .github/workflows/
+│   └── ci.yml             # Typecheck, testes, build, lint do web e smoke test da imagem
+├── Dockerfile             # Imagem multi-stage da aplicação (Node 24 slim)
+├── vitest.config.ts       # Configuração e variáveis de ambiente dos testes
 ├── render.yaml            # Blueprint de deploy no Render
 ├── .env.example
 └── CLAUDE.md              # Regras de código do repositório
@@ -150,7 +170,7 @@ Todas as respostas de erro seguem o mesmo formato:
 
 ## Variáveis de ambiente
 
-Carregadas do `.env` (via `dotenv`) ou do ambiente do processo e validadas em `src/lib/env.ts`. Se algum valor for inválido, a aplicação imprime os erros formatados pelo Zod e encerra com código `1`.
+Lidas do ambiente do processo e validadas em `src/lib/env.ts`. Os scripts `dev` e `start` carregam o `.env`, se existir, com a flag nativa `--env-file-if-exists` do Node; a imagem Docker não usa `.env`. Se algum valor for inválido, a aplicação imprime os erros formatados pelo Zod e encerra com código `1`.
 
 | Variável | Padrão | Descrição |
 | --- | --- | --- |
@@ -167,10 +187,11 @@ Carregadas do `.env` (via `dotenv`) ou do ambiente do processo e validadas em `s
 | `CORS_ORIGIN` | `http://localhost:3000` | Origens liberadas no CORS, separadas por vírgula (barra final é removida) |
 | `RATE_LIMIT_MAX` | `100` | Requisições por minuto por IP em todas as rotas |
 | `SHORTEN_RATE_LIMIT_MAX` | `10` | Requisições por minuto por IP em `POST /api/shorten` |
+| `URL_CACHE_TTL_SECONDS` | `86400` | Tempo que uma URL fica no cache do Redis depois de acessada |
 
 \* No Render, se `BASE_URL` não for definida, é usada a `RENDER_EXTERNAL_URL` que a plataforma fornece.
 
-Em desenvolvimento os logs usam `pino-pretty`; em produção são JSON puro. O CORS aceita apenas as origens de `CORS_ORIGIN`.
+Em desenvolvimento os logs usam `pino-pretty`, em produção são JSON puro e em testes ficam desligados. O CORS aceita apenas as origens de `CORS_ORIGIN`. O `@fastify/helmet` adiciona headers de segurança a todas as respostas, com a Content Security Policy desligada para não quebrar a página do Scalar em `/docs`.
 
 ## Rodando localmente
 
@@ -196,10 +217,37 @@ A API sobe em `http://localhost:3333` e a documentação fica em `http://localho
 
 | Script | Comando | Descrição |
 | --- | --- | --- |
-| `dev` | `tsx --watch src/index.ts` | Desenvolvimento com reload |
+| `dev` | `tsx --env-file-if-exists=.env --watch src/index.ts` | Desenvolvimento com reload |
 | `build` | `tsc` | Compila para `dist/` |
-| `start` | `node dist/index.js` | Executa a versão compilada |
+| `start` | `node --env-file-if-exists=.env dist/index.js` | Executa a versão compilada |
+| `test` | `vitest run` | Roda os testes uma vez |
+| `test:watch` | `vitest` | Roda os testes em modo watch |
 | `typecheck` | `tsc --noEmit` | Verificação de tipos |
+
+## Testes
+
+Testes de integração em `test/`, que sobem o app com `buildApp()` e fazem requisições com `app.inject()`, sem abrir porta. Não precisam de Docker:
+
+- o MongoDB roda em memória com `mongodb-memory-server` (o binário é baixado na primeira execução e fica em cache);
+- o módulo `src/lib/redis.ts` é substituído por `ioredis-mock`, que também executa o script Lua do contador.
+
+As variáveis de ambiente dos testes ficam em `vitest.config.ts`, e o `.env` nunca é lido. Cobrem criação e redirecionamento, validação, bloqueio de URLs do próprio encurtador, cache e fallback para o MongoDB, recuperação do contador, rate limit, CORS, headers de segurança, health checks e a documentação.
+
+```bash
+pnpm test
+```
+
+## CI
+
+O workflow `.github/workflows/ci.yml` roda em todo pull request e em push na `main`, com três jobs:
+
+| Job | O que faz |
+| --- | --- |
+| API | `pnpm typecheck`, `pnpm test` e `pnpm build` |
+| Web | `pnpm lint` e `pnpm build` em `web/` |
+| Docker image | Builda a imagem, sobe o container contra MongoDB e Redis reais, espera o `/api/health` responder e testa o fluxo de encurtar e redirecionar com `curl` |
+
+Os dois serviços do `render.yaml` usam `autoDeployTrigger: checksPass`, então o Render só faz deploy de um commit na `main` depois que o CI passa.
 
 ## Docker
 
@@ -220,7 +268,13 @@ docker compose down
 
 ### Imagem da aplicação (`Dockerfile`)
 
-Baseada em `node:24`: instala as dependências com pnpm, roda o build e inicia com `node dist/index.js`. É a imagem usada pelo Render.
+Multi-stage sobre `node:24-slim`:
+
+1. `build`: instala todas as dependências com `pnpm install --frozen-lockfile` e compila o TypeScript.
+2. `production-deps`: instala só as dependências de produção.
+3. `runtime`: copia `dist/` e `node_modules/` de produção e roda `node dist/index.js` com o usuário sem privilégios `node`.
+
+É a imagem usada pelo Render e testada no CI.
 
 ## Frontend (`web/`)
 
@@ -257,7 +311,7 @@ O dev server roda em `http://localhost:3000`, que é o valor padrão de `CORS_OR
 
 1. Suba o repositório para o GitHub.
 2. No [Render](https://render.com), clique em **New > Blueprint** e selecione o repositório. O `render.yaml` cria dois serviços no plano free:
-   - **`url-shortener`** (API, Docker): `NODE_ENV=production`, `MONGO_DB_NAME` e `MONGO_MAX_POOL_SIZE` fixos; `HASHIDS_SALT` gerado automaticamente; `MONGO_URL`, `REDIS_URL` e `CORS_ORIGIN` solicitados na criação; health check em `/`; mudanças apenas em `web/` ou em arquivos `.md` não disparam deploy.
+   - **`url-shortener`** (API, Docker): `NODE_ENV=production`, `MONGO_DB_NAME` e `MONGO_MAX_POOL_SIZE` fixos; `HASHIDS_SALT` gerado automaticamente; `MONGO_URL`, `REDIS_URL` e `CORS_ORIGIN` solicitados na criação; health check em `/`; deploy só depois do CI passar; mudanças apenas em `web/` ou em arquivos `.md` não disparam deploy.
    - **`url-shortener-web`** (frontend, static site): build com `pnpm build` a partir de `web/`, publica `web/dist` na CDN do Render com headers de segurança e cache longo para `/assets/*`; `VITE_API_URL` solicitado na criação; só faz deploy quando algo em `web/` muda.
 3. Preencha as variáveis e confirme:
    - `MONGO_URL` e `REDIS_URL`: strings de conexão do Atlas e do Upstash;

@@ -4,7 +4,7 @@ services:
     runtime: docker
     plan: free
     healthCheckPath: /
-    autoDeploy: true
+    autoDeployTrigger: checksPass
     buildFilter:
       ignoredPaths:
         - web/**
@@ -31,7 +31,7 @@ services:
     rootDir: web
     buildCommand: pnpm install --frozen-lockfile && pnpm build
     staticPublishPath: ./dist
-    autoDeploy: true
+    autoDeployTrigger: checksPass
     headers:
       - path: /*
         name: X-Frame-Options
