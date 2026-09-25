@@ -304,6 +304,8 @@ Se o navegador bloquear a área de transferência (permissão negada ou página 
 - **Modo claro e escuro** pelo botão de sol e lua no canto superior direito. Sem escolha salva, segue o tema do sistema e acompanha mudanças dele; a escolha fica no `localStorage`. Um script inline no `index.html` aplica o tema antes da primeira pintura, então a página não pisca, e a troca faz um cross-fade com a View Transitions API.
 - **Movimento**: botões reagem no toque (`active:scale`), o resultado entra com uma animação de opacidade, deslocamento e desfoque e a página rola até ele em telas pequenas. Com `prefers-reduced-motion` tudo vira fade simples; com `prefers-reduced-transparency` o botão de tema perde o efeito de vidro.
 - A mensagem de servidor iniciando só aparece se a requisição demorar mais de 1,5 s.
+- **Sem rolagem**: com o resultado na tela, a página cabe na janela de 360×640 a desktops grandes. Em telas com até 700px de altura (variante `short`) os espaçamentos verticais diminuem, e com até 600px (variante `tiny`) o parágrafo de descrição some depois de encurtar.
+- **Campo de URL**: depois de encurtar, o campo é limpo e perde o foco (a URL original continua no resultado). As sugestões do navegador ficam desligadas (`autoComplete="off"`) e o destaque de preenchimento automático é neutralizado no CSS.
 
 | Variável | Padrão | Descrição |
 | --- | --- | --- |
