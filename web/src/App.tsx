@@ -1,42 +1,57 @@
-import { type FormEvent, useEffect, useState } from 'react'
+import { type FormEvent, useEffect, useRef, useState } from 'react'
 
 import { useShortenUrl } from './hooks/use-shorten-url'
 
 const COPIED_FEEDBACK_MS = 2000
+
+type CopyStatus = 'idle' | 'copied' | 'failed'
 
 const withProtocol = (value: string) =>
   /^https?:\/\//i.test(value) ? value : `https://${value}`
 
 function App() {
   const [longUrl, setLongUrl] = useState('')
-  const [copied, setCopied] = useState(false)
+  const [copyStatus, setCopyStatus] = useState<CopyStatus>('idle')
+  const shortUrlRef = useRef<HTMLAnchorElement>(null)
   const { mutate, data, error, isPending, isSuccess, isError, reset } =
     useShortenUrl()
 
   useEffect(() => {
-    if (!copied) return
-    const timeout = setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS)
+    if (copyStatus !== 'copied') return
+    const timeout = setTimeout(() => setCopyStatus('idle'), COPIED_FEEDBACK_MS)
     return () => clearTimeout(timeout)
-  }, [copied])
+  }, [copyStatus])
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const trimmedUrl = longUrl.trim()
     if (!trimmedUrl) return
-    setCopied(false)
+    setCopyStatus('idle')
     mutate(withProtocol(trimmedUrl))
+  }
+
+  const selectShortUrl = () => {
+    const link = shortUrlRef.current
+    const selection = window.getSelection()
+    if (!link || !selection) return
+    selection.selectAllChildren(link)
   }
 
   const handleCopy = async () => {
     if (!data) return
-    await navigator.clipboard.writeText(data.shortUrl)
-    setCopied(true)
+    try {
+      await navigator.clipboard.writeText(data.shortUrl)
+      setCopyStatus('copied')
+    } catch {
+      selectShortUrl()
+      setCopyStatus('failed')
+    }
   }
 
   const handleNewUrl = () => {
     reset()
     setLongUrl('')
-    setCopied(false)
+    setCopyStatus('idle')
   }
 
   return (
@@ -126,6 +141,7 @@ function App() {
               </p>
               <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center">
                 <a
+                  ref={shortUrlRef}
                   href={data.shortUrl}
                   target="_blank"
                   rel="noreferrer"
@@ -138,9 +154,15 @@ function App() {
                   onClick={handleCopy}
                   className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-100 transition hover:bg-zinc-700"
                 >
-                  {copied ? 'Copiado!' : 'Copiar'}
+                  {copyStatus === 'copied' ? 'Copiado!' : 'Copiar'}
                 </button>
               </div>
+              {copyStatus === 'failed' && (
+                <p className="mt-3 text-sm text-amber-300">
+                  Não foi possível copiar automaticamente. O link foi
+                  selecionado: use Ctrl+C (ou ⌘+C) para copiar.
+                </p>
+              )}
               <p
                 className="mt-3 truncate text-sm text-zinc-500"
                 title={data.longUrl}

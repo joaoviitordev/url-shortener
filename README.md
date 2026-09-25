@@ -154,6 +154,7 @@ Todas as respostas de erro seguem o mesmo formato:
 ├── web/                   # Frontend React + Vite + TanStack Query
 │   └── src/
 │       ├── App.tsx        # Tela única: título, descrição, formulário e resultado
+│       ├── env.d.ts       # Tipagem de import.meta.env (VITE_API_URL)
 │       ├── hooks/
 │       │   └── use-shorten-url.ts  # useMutation que chama POST /api/shorten
 │       └── lib/
@@ -278,11 +279,15 @@ Multi-stage sobre `node:24-slim`:
 
 ## Frontend (`web/`)
 
-Tela única feita com **React 19**, **Vite 8**, **Tailwind CSS 4** e **TanStack Query 5**. O envio do formulário dispara um `useMutation` que chama `POST /api/shorten` e exibe a URL curta com botão de copiar. URLs digitadas sem protocolo (ex.: `exemplo.com`) recebem `https://` automaticamente.
+Tela única feita com **React 19**, **Vite 8**, **Tailwind CSS 4**, **TanStack Query 5** e **TypeScript 7** (mesma versão da API, com dependências em versões exatas). O envio do formulário dispara um `useMutation` que chama `POST /api/shorten` e exibe a URL curta com botão de copiar. URLs digitadas sem protocolo (ex.: `exemplo.com`) recebem `https://` automaticamente.
+
+Se o navegador bloquear a área de transferência (permissão negada ou página sem HTTPS), o link curto é selecionado e uma mensagem orienta a copiar com Ctrl+C.
 
 | Variável | Padrão | Descrição |
 | --- | --- | --- |
-| `VITE_API_URL` | `https://url-shortener-lchk.onrender.com` | URL base da API |
+| `VITE_API_URL` | `http://localhost:3333` no `pnpm dev` | URL base da API, embutida no bundle em tempo de build |
+
+O `pnpm build` falha se `VITE_API_URL` não estiver definida ou não for uma URL absoluta, o que impede publicar um frontend apontando para a API errada. A variável é tipada em `web/src/env.d.ts`.
 
 ```bash
 cd web
@@ -291,7 +296,7 @@ pnpm install
 pnpm dev
 ```
 
-O dev server roda em `http://localhost:3000`, que é o valor padrão de `CORS_ORIGIN` na API. Para usar a API local, defina `VITE_API_URL=http://localhost:3333` no `web/.env`.
+O dev server roda em `http://localhost:3000`, que é o valor padrão de `CORS_ORIGIN` na API. O `.env.example` já aponta para a API local; para usar a API publicada, troque `VITE_API_URL` no `web/.env`.
 
 ## Deploy gratuito (Render + Atlas + Upstash)
 
@@ -312,7 +317,7 @@ O dev server roda em `http://localhost:3000`, que é o valor padrão de `CORS_OR
 1. Suba o repositório para o GitHub.
 2. No [Render](https://render.com), clique em **New > Blueprint** e selecione o repositório. O `render.yaml` cria dois serviços no plano free:
    - **`url-shortener`** (API, Docker): `NODE_ENV=production`, `MONGO_DB_NAME` e `MONGO_MAX_POOL_SIZE` fixos; `HASHIDS_SALT` gerado automaticamente; `MONGO_URL`, `REDIS_URL` e `CORS_ORIGIN` solicitados na criação; health check em `/`; deploy só depois do CI passar; mudanças apenas em `web/` ou em arquivos `.md` não disparam deploy.
-   - **`url-shortener-web`** (frontend, static site): build com `pnpm build` a partir de `web/`, publica `web/dist` na CDN do Render com headers de segurança e cache longo para `/assets/*`; `VITE_API_URL` solicitado na criação; só faz deploy quando algo em `web/` muda.
+   - **`url-shortener-web`** (frontend, static site): build com `corepack pnpm build` a partir de `web/` (mesmo pnpm 12.5.1 do `packageManager`), publica `web/dist` na CDN do Render com headers de segurança e cache longo para `/assets/*`; `VITE_API_URL` solicitado na criação; só faz deploy quando algo em `web/` muda.
 3. Preencha as variáveis e confirme:
    - `MONGO_URL` e `REDIS_URL`: strings de conexão do Atlas e do Upstash;
    - `CORS_ORIGIN`: URL do frontend, ex.: `https://url-shortener-web.onrender.com`;
