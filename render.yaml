@@ -4,7 +4,11 @@ services:
     runtime: docker
     plan: free
     healthCheckPath: /
-    autoDeploy: true
+    autoDeployTrigger: checksPass
+    buildFilter:
+      ignoredPaths:
+        - web/**
+        - "**/*.md"
     envVars:
       - key: NODE_ENV
         value: production
@@ -12,9 +16,39 @@ services:
         sync: false
       - key: REDIS_URL
         sync: false
+      - key: CORS_ORIGIN
+        sync: false
       - key: HASHIDS_SALT
         generateValue: true
       - key: MONGO_DB_NAME
         value: url_shortener
       - key: MONGO_MAX_POOL_SIZE
         value: "10"
+
+  - type: web
+    name: url-shortener-web
+    runtime: static
+    rootDir: web
+    buildCommand: corepack pnpm install --frozen-lockfile && corepack pnpm build
+    staticPublishPath: ./dist
+    autoDeployTrigger: checksPass
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: COREPACK_ENABLE_DOWNLOAD_PROMPT
+        value: "0"
+      - key: VITE_API_URL
+        sync: false

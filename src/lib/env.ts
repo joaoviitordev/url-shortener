@@ -1,5 +1,3 @@
-import "dotenv/config";
-
 import z from "zod";
 
 const envSchema = z.object({
@@ -15,6 +13,19 @@ const envSchema = z.object({
   REDIS_URL: z.string().min(1),
   HASHIDS_SALT: z.string().min(1),
   HASHIDS_MIN_LENGTH: z.coerce.number().int().min(0).default(7),
+  CORS_ORIGIN: z
+    .string()
+    .default("http://localhost:3000")
+    .transform((value) =>
+      value
+        .split(",")
+        .map((origin) => origin.trim().replace(/\/+$/, ""))
+        .filter(Boolean),
+    )
+    .pipe(z.array(z.url()).min(1)),
+  RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
+  SHORTEN_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
+  URL_CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(86_400),
 });
 
 const parsed = envSchema.safeParse({

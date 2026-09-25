@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: API (typecheck, test, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - run: corepack enable
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - run: pnpm typecheck
+
+      - run: pnpm test
+
+      - run: pnpm build
+
+  web:
+    name: Web (lint, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - run: corepack enable
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm lint
+
+      - run: pnpm build
+        env:
+          VITE_API_URL: https://api.example.com
+
+  docker:
+    name: Docker image (build and smoke test)
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:8
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1}).ok'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - run: docker build -t url-shortener .
+
+      - name: Start container
+        run: |
+          docker run -d --name api --network host \
+            -e NODE_ENV=production \
+            -e BASE_URL=http://localhost:3333 \
+            -e MONGO_URL=mongodb://localhost:27017 \
+            -e REDIS_URL=redis://localhost:6379 \
+            -e HASHIDS_SALT=ci-salt \
+            url-shortener
+
+      - name: Wait for readiness
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://localhost:3333/api/health; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+
+      - name: Shorten and redirect
+        run: |
+          short_url=$(curl -fsS -X POST http://localhost:3333/api/shorten \
+            -H "Content-Type: application/json" \
+            -d '{"url":"https://example.com/ci"}' | jq -r .shortUrl)
+          echo "Short URL: $short_url"
+          location=$(curl -sS -o /dev/null -w "%{redirect_url}" "$short_url")
+          test "$location" = "https://example.com/ci"
+
+      - name: Container logs
+        if: always()
+        run: docker logs api
