@@ -13,7 +13,12 @@ describe("API docs", () => {
 
     expect(response.statusCode).toBe(200);
     expect(Object.keys(response.json().paths)).toEqual(
-      expect.arrayContaining(["/", "/api/health", "/api/shorten", "/{shortCode}"]),
+      expect.arrayContaining([
+        "/",
+        "/api/health",
+        "/api/shorten",
+        "/{shortCode}",
+      ]),
     );
   });
 

@@ -42,5 +42,4 @@ export const nextId = async (): Promise<number> => {
 };
 
 export const isDuplicateKeyError = (error: unknown): boolean =>
-  error instanceof MongoServerError &&
-  error.code === DUPLICATE_KEY_ERROR_CODE;
+  error instanceof MongoServerError && error.code === DUPLICATE_KEY_ERROR_CODE;

@@ -38,10 +38,7 @@ const friendlyMessageByCode: Record<string, string> = {
 }
 
 const isApiErrorBody = (body: unknown): body is ApiErrorBody =>
-  typeof body === 'object' &&
-  body !== null &&
-  'error' in body &&
-  'code' in body
+  typeof body === 'object' && body !== null && 'error' in body && 'code' in body
 
 export const shortenUrl = async (url: string): Promise<ShortenedUrl> => {
   let response: Response
@@ -65,7 +62,9 @@ export const shortenUrl = async (url: string): Promise<ShortenedUrl> => {
     const code = isApiErrorBody(body) ? body.code : 'UNKNOWN_ERROR'
     throw new ApiError(
       friendlyMessageByCode[code] ??
-        (isApiErrorBody(body) ? body.error : 'Algo deu errado. Tente novamente.'),
+        (isApiErrorBody(body)
+          ? body.error
+          : 'Algo deu errado. Tente novamente.'),
       code,
     )
   }
